@@ -1,0 +1,17 @@
+{
+  "name": "Generic CPU",
+  "version": "1.0.0",
+  "library_path": "libgeneric_cpu.so",
+  
+  "compilation": {
+    "supports_assembly": true,
+    "supports_c": false,
+    "assembly_syntax": "generic"
+  },
+
+  "defaults": {
+    "reset_vector": "0x8000",
+    "speed_ratio": 1.0
+  }
+}
+

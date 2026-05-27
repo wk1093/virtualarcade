@@ -1,0 +1,11 @@
+{
+  "name": "Generic GPU",
+  "version": "1.0.0",
+  "library_path": "libgeneric_gpu.so",
+  
+  "defaults": {
+    "resolution_w": 256,
+    "resolution_h": 240,
+    "speed_ratio": 0.33
+  }
+}

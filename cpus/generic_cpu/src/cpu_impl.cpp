@@ -1,4 +1,5 @@
 #include "generic_cpu.h"
+#include "arcade_spec.h"
 #include <iostream>
 #include <cstring>
 
@@ -92,5 +93,18 @@ extern "C" {
         };
         
         return &interface;
+    }
+
+    CPU_Specification* get_cpu_spec() {
+        static CPU_Specification spec = {
+            .name = "Generic CPU",
+            .architecture = "8-bit processor",
+            .isa_version = "1.0",
+            .supports_assembly = 1,
+            .supports_c_compilation = 0,
+            .assembly_syntax = "generic"
+        };
+        
+        return &spec;
     }
 }

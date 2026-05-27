@@ -22,13 +22,13 @@ MotherboardConfig MotherboardConfig::from_json(const json& j) {
     config.version = j.value("version", "1.0.0");
     config.master_clock = j.value("master_clock", 1000000);
 
+    // Parse component references
     if (j.contains("components")) {
         for (const auto& comp_json : j["components"]) {
-            ComponentConfig comp;
-            comp.name = comp_json.value("name", "unnamed");
+            ComponentRef comp;
             comp.type = comp_json.value("type", "unknown");
-            comp.library_path = comp_json.value("library_path", "");
-            comp.config = comp_json.value("config", json::object());
+            comp.name = comp_json.value("name", "unnamed");
+            comp.overrides = comp_json.value("overrides", json::object());
             
             config.components.push_back(comp);
         }

@@ -1,0 +1,13 @@
+{
+  "name": "Generic RAM",
+  "version": "1.0.0",
+  "type": "SRAM",
+  
+  "defaults": {
+    "size": 2048,
+    "start_address": 0,
+    "concurrent_read_ports": 1,
+    "concurrent_write_ports": 1,
+    "access_time_ns": 150
+  }
+}

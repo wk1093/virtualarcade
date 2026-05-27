@@ -1,0 +1,11 @@
+{
+  "name": "Generic ROM",
+  "version": "1.0.0",
+  "type": "Cartridge ROM",
+  
+  "defaults": {
+    "size": 32768,
+    "start_address": 32768,
+    "access_time_ns": 200
+  }
+}
