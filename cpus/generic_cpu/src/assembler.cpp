@@ -180,6 +180,23 @@ AsmResult GenericAssembler::assemble(const std::string& source) {
             emit(0x98);
         } else if (mnem == "RTS") {
             emit(0x60);
+        } else if (mnem == "LDX") {
+            if (tokens.size() < 2) {
+                err(ln + 1, "LDX needs operand");
+                continue;
+            }
+            std::string op = tokens[1];
+            if (op.empty() || op[0] != '#') {
+                err(ln + 1, "LDX currently only supports immediate mode (#value)");
+                continue;
+            }
+            uint32_t v = 0;
+            if (!parse_number(op.substr(1), v)) {
+                err(ln + 1, "Invalid immediate: " + op);
+            } else {
+                emit(0xA2);
+                emit(static_cast<uint8_t>(v));
+            }
         } else if (mnem == "LDA" || mnem == "ADC" || mnem == "SBC" ||
                    mnem == "AND" || mnem == "ORA" || mnem == "EOR" || mnem == "CMP") {
             if (tokens.size() < 2) {

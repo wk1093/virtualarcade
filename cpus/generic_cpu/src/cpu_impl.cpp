@@ -63,6 +63,11 @@ void GenericCPU::step(uint8_t* memory) {
             a = memory[pc];
             update_zn_flags(a);
             break;
+        case 0xA2: // LDX immediate
+            pc++;
+            x = memory[pc];
+            update_zn_flags(x);
+            break;
         case 0xAD: { // LDA absolute
             uint16_t addr = static_cast<uint16_t>(memory[pc + 1] | (memory[pc + 2] << 8));
             a = memory[addr];
