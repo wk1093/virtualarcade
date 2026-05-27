@@ -7,273 +7,21 @@
 #include <fstream>
 #include <filesystem>
 #include <cstdlib>
-#include <cstdio>
+#include <unistd.h>
 #include "app_state.h"
+#include "dialog_manager.h"
+#include "menu_handler.h"
 #include "panels/motherboard_panel.h"
 #include "panels/rom_panel.h"
 #include "panels/code_panel.h"
-#ifdef _WIN32
-#error Windows is not supported (yet)
-#else
-#include <unistd.h>
-#endif
-
-// ============================================================
-// Helpers
-// ============================================================
 
 namespace fs = std::filesystem;
 
-static char g_save_mb_buf[512]  = "";
-static char g_save_img_buf[512] = "";
-static char g_open_mb_buf[512]  = "";
-static char g_open_img_buf[512] = "";
-
-static bool g_request_open_save_mb_dialog = false;
-static bool g_request_open_save_img_dialog = false;
-static bool g_request_open_open_mb_dialog = false;
-static bool g_request_open_open_img_dialog = false;
-
-static void render_menu_bar(AppState& s, SDL_Window* window, bool& running) {
-    if (ImGui::BeginMainMenuBar()) {
-
-        if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("New Project", "Ctrl+N")) {
-                s.new_project();
-                MotherboardPanel::needs_sync = true;
-            }
-
-            ImGui::Separator();
-            if (ImGui::MenuItem("Open Motherboard (.json)..."))
-                g_request_open_open_mb_dialog = true;
-            if (ImGui::MenuItem("Open ROM Image (.img)..."))
-                g_request_open_open_img_dialog = true;
-
-            ImGui::Separator();
-            if (ImGui::MenuItem("Save Motherboard", "Ctrl+M")) {
-                if (!s.motherboard_file.empty()) s.save_motherboard(s.motherboard_file);
-                else g_request_open_save_mb_dialog = true;
-            }
-            if (ImGui::MenuItem("Save Motherboard As..."))
-                g_request_open_save_mb_dialog = true;
-
-            if (ImGui::MenuItem("Save ROM Image", "Ctrl+S")) {
-                if (!s.image_file.empty()) {
-                    if (s.save_image(s.image_file))
-                        s.build_log.info("Saved ROM image to " + s.image_file);
-                    else
-                        s.build_log.error("Failed to save ROM image");
-                } else {
-                    g_request_open_save_img_dialog = true;
-                }
-            }
-            if (ImGui::MenuItem("Save ROM Image As..."))
-                g_request_open_save_img_dialog = true;
-
-            ImGui::Separator();
-            if (ImGui::MenuItem("Exit", "Alt+F4")) running = false;
-
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("View")) {
-            ImGui::MenuItem("Motherboard", nullptr, &s.show_motherboard_panel);
-            ImGui::MenuItem("ROM Editor",  nullptr, &s.show_rom_panel);
-            ImGui::MenuItem("Code Editor", nullptr, &s.show_code_panel);
-            ImGui::MenuItem("Build Output",nullptr, &s.show_build_panel);
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Run")) {
-            if (ImGui::MenuItem("Launch Runner with current config")) {
-                // Save if needed
-                std::string mb  = s.motherboard_file.empty() ? "/tmp/vae_tmp_mb.json"  : s.motherboard_file;
-                std::string img = s.image_file.empty()       ? "/tmp/vae_tmp_rom.img"  : s.image_file;
-                
-                if (!s.save_motherboard(mb)) {
-                    s.build_log.error("Failed to save motherboard config");
-                    ImGui::EndMenu();
-                    if (ImGui::IsItemHovered()) {} ImGui::EndPopup(); // graceful exit
-                    return;
-                }
-                
-                if (!s.save_image(img)) {
-                    s.build_log.error("Failed to save ROM image");
-                    ImGui::EndMenu();
-                    if (ImGui::IsItemHovered()) {} ImGui::EndPopup(); // graceful exit
-                    return;
-                }
-
-                // Get runner path relative to this executable
-                char exe_path[4096] = {};
-                ssize_t cnt = readlink("/proc/self/exe", exe_path, sizeof(exe_path)-1);
-                std::string runner_path = "./runner";
-                if (cnt > 0) {
-                    std::string dir = std::string(exe_path, cnt);
-                    dir = dir.substr(0, dir.find_last_of('/'));
-                    runner_path = dir + "/runner";
-                }
-                // Build command with both motherboard config and ROM image
-                std::string cmd = runner_path + " \"" + mb + "\" \"" + img + "\" &";
-                s.build_log.info("Launching: " + cmd);
-                int result = std::system(cmd.c_str());
-                if (result != 0) {
-                    s.build_log.error("Failed to launch runner (exit code: " + std::to_string(result) + ")");
-                } else {
-                    s.build_log.info("Runner launched successfully");
-                }
-            }
-            ImGui::EndMenu();
-        }
-
-        // ---- Status in menu bar ----
-        if (s.mb_modified)
-            ImGui::TextColored(ImVec4(1,0.6f,0,1), "  MB*");
-        bool any_rom_dirty = false;
-        for (auto& r : s.rom_slots) if (r.modified) { any_rom_dirty = true; break; }
-        if (any_rom_dirty)
-            ImGui::TextColored(ImVec4(1,0.6f,0,1), "  ROM*");
-
-        ImGui::EndMainMenuBar();
-    }
-}
-
 // ============================================================
-// Render all file dialogs (called each frame from main loop)
-// ============================================================
-
-static void render_dialogs(AppState& s) {
-    if (g_request_open_save_mb_dialog) {
-        if (!s.motherboard_file.empty()) {
-            std::snprintf(g_save_mb_buf, sizeof(g_save_mb_buf), "%s", s.motherboard_file.c_str());
-        }
-        ImGui::OpenPopup("SaveMBDialog");
-        g_request_open_save_mb_dialog = false;
-    }
-    if (g_request_open_save_img_dialog) {
-        if (!s.image_file.empty()) {
-            std::snprintf(g_save_img_buf, sizeof(g_save_img_buf), "%s", s.image_file.c_str());
-        }
-        ImGui::OpenPopup("SaveImgDialog");
-        g_request_open_save_img_dialog = false;
-    }
-    if (g_request_open_open_mb_dialog) {
-        ImGui::OpenPopup("OpenMBDialog");
-        g_request_open_open_mb_dialog = false;
-    }
-    if (g_request_open_open_img_dialog) {
-        ImGui::OpenPopup("OpenImgDialog");
-        g_request_open_open_img_dialog = false;
-    }
-
-    // ---- Save Motherboard Dialog ----
-    if (ImGui::BeginPopupModal("SaveMBDialog", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Save motherboard config as:");
-        ImGui::SetNextItemWidth(400);
-        ImGui::InputText("##mb_path", g_save_mb_buf, sizeof(g_save_mb_buf));
-        ImGui::Separator();
-        if (ImGui::Button("Save", ImVec2(120, 0))) {
-            if (std::string(g_save_mb_buf)[0] != '\0') {
-                if (s.save_motherboard(std::string(g_save_mb_buf))) {
-                    s.build_log.info("Saved: " + std::string(g_save_mb_buf));
-                    g_save_mb_buf[0] = '\0';
-                } else {
-                    s.build_log.error("Save failed: " + std::string(g_save_mb_buf));
-                }
-                ImGui::CloseCurrentPopup();
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            g_save_mb_buf[0] = '\0';
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-
-    // ---- Save ROM Image Dialog ----
-    if (ImGui::BeginPopupModal("SaveImgDialog", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Save ROM image as:");
-        ImGui::SetNextItemWidth(400);
-        ImGui::InputText("##img_path", g_save_img_buf, sizeof(g_save_img_buf));
-        ImGui::Separator();
-        if (ImGui::Button("Save", ImVec2(120, 0))) {
-            if (std::string(g_save_img_buf)[0] != '\0') {
-                if (s.save_image(std::string(g_save_img_buf))) {
-                    s.build_log.info("Saved: " + std::string(g_save_img_buf));
-                    g_save_img_buf[0] = '\0';
-                } else {
-                    s.build_log.error("Save failed: " + std::string(g_save_img_buf));
-                }
-                ImGui::CloseCurrentPopup();
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            g_save_img_buf[0] = '\0';
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-
-    // ---- Open Motherboard Dialog ----
-    if (ImGui::BeginPopupModal("OpenMBDialog", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Open motherboard config (.json):");
-        ImGui::SetNextItemWidth(400);
-        ImGui::InputText("##open_mb", g_open_mb_buf, sizeof(g_open_mb_buf));
-        ImGui::Separator();
-        if (ImGui::Button("Open", ImVec2(120, 0))) {
-            if (std::string(g_open_mb_buf)[0] != '\0') {
-                if (s.load_motherboard(std::string(g_open_mb_buf))) {
-                    s.build_log.info("Opened: " + std::string(g_open_mb_buf));
-                    MotherboardPanel::needs_sync = true;
-                    g_open_mb_buf[0] = '\0';
-                } else {
-                    s.build_log.error("Failed to open: " + std::string(g_open_mb_buf));
-                }
-                ImGui::CloseCurrentPopup();
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            g_open_mb_buf[0] = '\0';
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-
-    // ---- Open ROM Image Dialog ----
-    if (ImGui::BeginPopupModal("OpenImgDialog", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Open ROM image (.img):");
-        ImGui::SetNextItemWidth(400);
-        ImGui::InputText("##open_img", g_open_img_buf, sizeof(g_open_img_buf));
-        ImGui::Separator();
-        if (ImGui::Button("Open", ImVec2(120, 0))) {
-            if (std::string(g_open_img_buf)[0] != '\0') {
-                if (s.load_image(std::string(g_open_img_buf))) {
-                    s.build_log.info("Opened: " + std::string(g_open_img_buf));
-                    g_open_img_buf[0] = '\0';
-                } else {
-                    s.build_log.error("Failed to open: " + std::string(g_open_img_buf));
-                }
-                ImGui::CloseCurrentPopup();
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            g_open_img_buf[0] = '\0';
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-}
-
-// ============================================================
-// Left sidebar: motherboard + rom slot list together
+// UI Rendering Helpers
 // ============================================================
 
 static void render_left_sidebar(AppState& s) {
-    // Bind visibility to show_motherboard_panel (for now use it for whole project panel)
     if (!s.show_motherboard_panel && !s.show_rom_panel) return;
     
     if (ImGui::Begin("Project", nullptr)) {
@@ -291,10 +39,6 @@ static void render_left_sidebar(AppState& s) {
     }
     ImGui::End();
 }
-
-// ============================================================
-// Right area: ROM editor, code editor, build panel
-// ============================================================
 
 static void render_content_panes(AppState& s) {
     RomPanel::render_center(s);
@@ -340,6 +84,10 @@ int main(int argc, char* argv[]) {
     state.build_log.info("Welcome to VAE Editor");
     state.build_log.info("Open or create a motherboard config and ROM images to get started.");
 
+    // Create manager instances
+    DialogManager dialog_manager;
+    MenuHandler menu_handler;
+
     bool running = true;
     while (running) {
         SDL_Event event;
@@ -368,10 +116,32 @@ int main(int argc, char* argv[]) {
         // Set up docking space
         ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
 
-        render_menu_bar(state, window, running);
+        // Render menu bar and check for dialog requests
+        if (!menu_handler.render_menu_bar(state, window)) {
+            running = false;
+        }
+        
+        // Check for dialog requests and forward them
+        if (menu_handler.should_open_save_mb_dialog()) {
+            dialog_manager.request_save_motherboard_dialog();
+            menu_handler.clear_save_mb_dialog_request();
+        }
+        if (menu_handler.should_open_save_rom_dialog()) {
+            dialog_manager.request_save_rom_dialog();
+            menu_handler.clear_save_rom_dialog_request();
+        }
+        if (menu_handler.should_open_open_mb_dialog()) {
+            dialog_manager.request_open_motherboard_dialog();
+            menu_handler.clear_open_mb_dialog_request();
+        }
+        if (menu_handler.should_open_open_rom_dialog()) {
+            dialog_manager.request_open_rom_dialog();
+            menu_handler.clear_open_rom_dialog_request();
+        }
+
         render_left_sidebar(state);
         render_content_panes(state);
-        render_dialogs(state);
+        dialog_manager.render(state);
 
         ImGui::Render();
         SDL_SetRenderDrawColor(renderer, 18, 18, 20, 255);

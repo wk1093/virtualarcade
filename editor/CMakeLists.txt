@@ -26,6 +26,8 @@ target_include_directories(ImGui PUBLIC
 
 add_executable(editor
     src/main.cpp
+    src/dialog_manager.cpp
+    src/menu_handler.cpp
 )
 target_include_directories(editor PRIVATE
     ../common/include
