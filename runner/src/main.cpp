@@ -9,6 +9,7 @@
 #include "arcade_interface.h"
 #include "arcade_spec.h"
 #include "config.h"
+#include "image_format.h"
 
 namespace fs = std::filesystem;
 
@@ -122,9 +123,25 @@ int main(int argc, char* argv[]) {
             
             // Track memory components for later
             if (comp_ref.type == "ram" || comp_ref.type == "rom") {
-                memory_specs.push_back(effective_config);
-                uint32_t start = effective_config.value("start_address", 0);
-                uint32_t size = effective_config.value("size", 0);
+                json mem_info = effective_config;
+                
+                // Check if we need to extract from defaults
+                uint32_t start = mem_info.value("start_address", 0);
+                uint32_t size = mem_info.value("size", 0);
+                
+                if (start == 0 && size == 0 && mem_info.contains("defaults")) {
+                    start = mem_info["defaults"].value("start_address", 0);
+                    size = mem_info["defaults"].value("size", 0);
+                }
+                
+                // Flatten the config for easier access later
+                json flattened;
+                flattened["type"] = comp_ref.type;
+                flattened["name"] = comp_ref.name;
+                flattened["start_address"] = start;
+                flattened["size"] = size;
+                memory_specs.push_back(flattened);
+                
                 if (start + size > total_memory) {
                     total_memory = start + size;
                 }
@@ -139,6 +156,39 @@ int main(int argc, char* argv[]) {
         // Create unified memory space
         std::cout << "\nTotal memory space: " << total_memory << " bytes" << std::endl;
         std::vector<uint8_t> ram(total_memory, 0);
+
+        // Try to load ROM images from .img file if it exists
+        std::string img_file = data_dir + "/rom.img";
+        if (fs::exists(img_file)) {
+            try {
+                std::cout << "\n=== Loading ROM Images ===" << std::endl;
+                VarcadeImage::ImageFile imgf = VarcadeImage::ImageFile::load(img_file);
+                
+                for (size_t i = 0; i < imgf.headers.size(); i++) {
+                    const auto& header = imgf.headers[i];
+                    const auto& image_data = imgf.images[i];
+                    
+                    // Find the corresponding ROM memory spec
+                    for (const auto& mem_spec : memory_specs) {
+                        if (mem_spec.value("type", "") == "rom") {
+                            uint32_t rom_start = mem_spec.value("start_address", 0);
+                            uint32_t rom_size = mem_spec.value("size", 0);
+                            uint32_t copy_size = std::min(static_cast<uint32_t>(image_data.size()), rom_size);
+                            
+                            if (rom_start + copy_size <= total_memory) {
+                                std::cout << "Loading ROM image: " << header.name 
+                                          << " (" << copy_size << " bytes @ 0x" 
+                                          << std::hex << rom_start << std::dec << ")" << std::endl;
+                                std::memcpy(ram.data() + rom_start, image_data.data(), copy_size);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "Warning: Could not load ROM images: " << e.what() << std::endl;
+            }
+        }
 
         // Load dynamic libraries
         std::cout << "\n=== Loading Dynamic Libraries ===" << std::endl;
