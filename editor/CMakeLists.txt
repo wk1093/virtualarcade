@@ -24,7 +24,14 @@ target_include_directories(ImGui PUBLIC
     ${imgui_SOURCE_DIR}/backends
 )
 
-add_executable(editor src/main.cpp)
+add_executable(editor
+    src/main.cpp
+)
+target_include_directories(editor PRIVATE
+    ../common/include
+    ${CMAKE_SOURCE_DIR}/build/_deps/json-src/include
+    src
+)
 target_link_libraries(editor PRIVATE SDL3::SDL3 ImGui)
 
 # Create data directories in build output

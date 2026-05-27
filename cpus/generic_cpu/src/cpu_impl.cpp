@@ -20,8 +20,9 @@ void GenericCPU::step(uint8_t* memory) {
 
     // Fetch instruction at PC
     uint8_t opcode = memory[pc];
+    std::cout << "Fetching 0x" << std::hex << (int)opcode << " at PC 0x" << pc << std::dec << std::endl;
 
-    // Execute a few basic opcodes
+    // Execute opcodes
     switch (opcode) {
         case 0xEA: // NOP
             break;
@@ -42,6 +43,35 @@ void GenericCPU::step(uint8_t* memory) {
         case 0x00: // BRK (end execution)
             std::cout << "BRK encountered at PC: 0x" << std::hex << pc << std::endl;
             break;
+        case 0x4C: { // JMP absolute
+            // Next two bytes form the address (little-endian)
+            uint16_t addr = memory[pc + 1] | (memory[pc + 2] << 8);
+            pc = addr;
+            cycle_count++;
+            return;  // Don't increment PC again at end of function
+        }
+        case 0x20: { // JSR absolute (jump to subroutine)
+            // Push return address (PC + 3) onto stack
+            uint16_t ret_addr = pc + 3 - 1;  // -1 because we'll increment at end
+            memory[0x100 + sp] = (ret_addr >> 8) & 0xFF;
+            sp--;
+            memory[0x100 + sp] = ret_addr & 0xFF;
+            sp--;
+            // Jump to subroutine
+            uint16_t addr = memory[pc + 1] | (memory[pc + 2] << 8);
+            pc = addr;
+            cycle_count++;
+            return;
+        }
+        case 0x60: { // RTS (return from subroutine)
+            // Pop return address from stack
+            sp++;
+            uint16_t ret_addr = memory[0x100 + sp];
+            sp++;
+            ret_addr |= (memory[0x100 + sp] << 8);
+            pc = ret_addr;
+            break;
+        }
         default:
             // Unknown opcode - just skip
             break;

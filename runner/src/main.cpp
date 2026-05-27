@@ -75,11 +75,12 @@ std::string find_library_for_component(const std::string& type, const std::strin
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: runner <config.json>" << std::endl;
+        std::cerr << "Usage: runner <motherboard.json> [rom.img]" << std::endl;
         return 1;
     }
 
     std::string config_path = argv[1];
+    std::string rom_path = (argc >= 3) ? argv[2] : "";
     
     // Get the executable directory and construct the data directory path
     std::string exe_dir = get_executable_dir(argv[0]);
@@ -158,7 +159,8 @@ int main(int argc, char* argv[]) {
         std::vector<uint8_t> ram(total_memory, 0);
 
         // Try to load ROM images from .img file if it exists
-        std::string img_file = data_dir + "/rom.img";
+        // Use provided ROM path if given, otherwise fall back to data/rom.img
+        std::string img_file = rom_path.empty() ? (data_dir + "/rom.img") : rom_path;
         if (fs::exists(img_file)) {
             try {
                 std::cout << "\n=== Loading ROM Images ===" << std::endl;
