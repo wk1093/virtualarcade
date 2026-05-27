@@ -267,11 +267,38 @@ int main(int argc, char* argv[]) {
         std::cout << "\n=== Starting Emulation ===" << std::endl;
         uint32_t framebuffer[256 * 240];
         std::memset(framebuffer, 0, sizeof(framebuffer));
+        constexpr uint16_t MMIO_STDOUT_ADDR = 0x00F0;
 
         // Run for a limited number of cycles for testing
         for (int cycle = 0; cycle < 1000; cycle++) {
+            uint16_t pc_before = cpu_iface->get_pc();
+            uint8_t opcode_before = ram[pc_before];
+
+            if (cycle % 100 == 0) {
+                std::cout << "Cycle " << cycle << " - PC: 0x" << std::hex << pc_before << std::dec << std::endl;
+            }
+
+            // Stop once BRK is reached so we don't march through zero-filled memory.
+            if (opcode_before == 0x00) {
+                std::cout << "BRK encountered at PC: 0x" << std::hex << pc_before << std::dec << std::endl;
+                break;
+            }
+
             // Execute CPU step
             cpu_iface->step(ram.data());
+
+            // Very simple MMIO terminal output: write a byte to $00F0 to print it.
+            if (MMIO_STDOUT_ADDR < ram.size() && ram[MMIO_STDOUT_ADDR] != 0) {
+                uint8_t out = ram[MMIO_STDOUT_ADDR];
+                if (out >= 32 && out <= 126) {
+                    std::cout << "[MMIO $00F0] '" << static_cast<char>(out)
+                              << "' (0x" << std::hex << static_cast<int>(out) << std::dec << ")" << std::endl;
+                } else {
+                    std::cout << "[MMIO $00F0] 0x" << std::hex << static_cast<int>(out)
+                              << std::dec << std::endl;
+                }
+                ram[MMIO_STDOUT_ADDR] = 0;
+            }
 
             // Execute GPU step
             gpu_iface->step(ram.data());
@@ -279,9 +306,6 @@ int main(int argc, char* argv[]) {
             // Render GPU
             gpu_iface->render(framebuffer, 256, 240);
 
-            if (cycle % 100 == 0) {
-                std::cout << "Cycle " << cycle << " - PC: 0x" << std::hex << cpu_iface->get_pc() << std::dec << std::endl;
-            }
         }
 
         std::cout << "=== Emulation Complete ===" << std::endl;

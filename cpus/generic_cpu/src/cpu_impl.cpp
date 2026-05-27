@@ -18,9 +18,26 @@ void GenericCPU::reset() {
 void GenericCPU::step(uint8_t* memory) {
     if (!memory) return;
 
+    constexpr uint8_t FLAG_CARRY = 1 << 0;
+    constexpr uint8_t FLAG_ZERO = 1 << 1;
+    constexpr uint8_t FLAG_NEGATIVE = 1 << 7;
+
+    auto set_flag = [&](uint8_t flag, bool enabled) {
+        if (enabled) status |= flag;
+        else status &= (uint8_t)~flag;
+    };
+
+    auto get_flag = [&](uint8_t flag) -> bool {
+        return (status & flag) != 0;
+    };
+
+    auto update_zn_flags = [&](uint8_t value) {
+        set_flag(FLAG_ZERO, value == 0);
+        set_flag(FLAG_NEGATIVE, (value & 0x80) != 0);
+    };
+
     // Fetch instruction at PC
     uint8_t opcode = memory[pc];
-    std::cout << "Fetching 0x" << std::hex << (int)opcode << " at PC 0x" << pc << std::dec << std::endl;
 
     // Execute opcodes
     switch (opcode) {
@@ -29,16 +46,34 @@ void GenericCPU::step(uint8_t* memory) {
         case 0xA9: // LDA immediate
             pc++;
             a = memory[pc];
+            update_zn_flags(a);
             break;
+        case 0x85: { // STA zero page
+            pc++;
+            uint8_t addr = memory[pc];
+            memory[addr] = a;
+            break;
+        }
         case 0x69: // ADC immediate
             pc++;
             a += memory[pc];
+            update_zn_flags(a);
             break;
+        case 0xC9: { // CMP immediate
+            pc++;
+            uint8_t operand = memory[pc];
+            uint8_t result = static_cast<uint8_t>(a - operand);
+            set_flag(FLAG_CARRY, a >= operand);
+            update_zn_flags(result);
+            break;
+        }
         case 0xE8: // INX
             x++;
+            update_zn_flags(x);
             break;
         case 0xC8: // INY
             y++;
+            update_zn_flags(y);
             break;
         case 0x00: // BRK (end execution)
             std::cout << "BRK encountered at PC: 0x" << std::hex << pc << std::endl;
@@ -71,6 +106,46 @@ void GenericCPU::step(uint8_t* memory) {
             ret_addr |= (memory[0x100 + sp] << 8);
             pc = ret_addr;
             break;
+        }
+        case 0xD0: { // BNE relative
+            int8_t offset = static_cast<int8_t>(memory[pc + 1]);
+            if (!get_flag(FLAG_ZERO)) {
+                pc = static_cast<uint16_t>(pc + 2 + offset);
+            } else {
+                pc += 2;
+            }
+            cycle_count++;
+            return;
+        }
+        case 0xF0: { // BEQ relative
+            int8_t offset = static_cast<int8_t>(memory[pc + 1]);
+            if (get_flag(FLAG_ZERO)) {
+                pc = static_cast<uint16_t>(pc + 2 + offset);
+            } else {
+                pc += 2;
+            }
+            cycle_count++;
+            return;
+        }
+        case 0x90: { // BCC relative
+            int8_t offset = static_cast<int8_t>(memory[pc + 1]);
+            if (!get_flag(FLAG_CARRY)) {
+                pc = static_cast<uint16_t>(pc + 2 + offset);
+            } else {
+                pc += 2;
+            }
+            cycle_count++;
+            return;
+        }
+        case 0xB0: { // BCS relative
+            int8_t offset = static_cast<int8_t>(memory[pc + 1]);
+            if (get_flag(FLAG_CARRY)) {
+                pc = static_cast<uint16_t>(pc + 2 + offset);
+            } else {
+                pc += 2;
+            }
+            cycle_count++;
+            return;
         }
         default:
             // Unknown opcode - just skip
