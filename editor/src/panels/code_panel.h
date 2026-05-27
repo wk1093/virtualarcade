@@ -6,8 +6,13 @@
 #include <cstring>
 #include <fstream>
 #include <cstdio>
+#include <filesystem>
+#include <algorithm>
+#include <limits.h>
+#include <dlfcn.h>
+#include <unistd.h>
 #include "app_state.h"
-#include "../assembler.h"
+#include "arcade_interface.h"
 
 // ============================================================
 // Code Editor Panel + Build System
@@ -41,99 +46,175 @@ inline void ensure_buffers(AppState& s) {
     }
 }
 
-// Kick off assembler → ROM slot
-inline void assemble_to_rom(AppState& s, int slot_idx) {
-    s.build_log.clear();
-    s.build_log.info("=== Assembling slot [" + s.rom_slots[slot_idx].name + "] ===");
+namespace fs = std::filesystem;
 
-    const char* src = slot_bufs[slot_idx].data();
-    Assembler::AsmResult res = Assembler::assemble(std::string(src));
+struct CpuToolchainHandle {
+    void* so_handle = nullptr;
+    CPU_Interface* cpu_iface = nullptr;
+    std::string cpu_name;
+    std::string so_path;
+    std::string last_error;
+};
 
-    if (!res.errors.empty()) {
-        for (const auto& e : res.errors)
-            s.build_log.error("Line " + std::to_string(e.line) + ": " + e.message);
-        s.build_log.error("Assembly FAILED");
-    } else {
-        auto& slot = s.rom_slots[slot_idx];
-        // Pad/truncate output to slot size
-        size_t slot_size = slot.data.size();
-        slot.data.assign(slot_size, 0);
-        size_t copy = std::min(res.bytes.size(), slot_size);
-        std::copy(res.bytes.begin(), res.bytes.begin() + copy, slot.data.begin());
-        slot.modified = true;
-        slot.source   = RomSlot::Source::Code;
-        s.code_buffers[slot_idx] = std::string(src);
-        s.code_sources[slot_idx] = RomSlot::Source::Code;
-        s.build_log.info("Assembled " + std::to_string(res.bytes.size()) + " bytes");
-        s.build_log.info("Written to ROM at base 0x"
-            + []{ char b[16]; snprintf(b,16,"%04X",0); return std::string(b); }()
-            + "  (origin $" + std::to_string(res.origin) + ")");
-        s.build_log.info("Assembly OK");
-    }
+static CpuToolchainHandle g_toolchain;
+static int g_language_idx = 0;
+
+inline void unload_toolchain() {
+    if (g_toolchain.so_handle) dlclose(g_toolchain.so_handle);
+    g_toolchain = CpuToolchainHandle{};
+    g_language_idx = 0;
 }
 
-// Invoke system C compiler → binary → ROM slot
-inline void compile_c_to_rom(AppState& s, int slot_idx) {
+inline std::string get_executable_dir() {
+    char exe_path[PATH_MAX] = {};
+    ssize_t cnt = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (cnt > 0) {
+        std::string full(exe_path, cnt);
+        auto slash = full.find_last_of('/');
+        if (slash != std::string::npos) return full.substr(0, slash);
+    }
+    return ".";
+}
+
+inline std::string get_active_cpu_name(const AppState& s) {
+    for (const auto& c : s.motherboard.components) {
+        if (c.type == "cpu" && !c.name.empty()) return c.name;
+    }
+    return "";
+}
+
+inline std::string resolve_cpu_library_path(const std::string& cpu_name) {
+    if (cpu_name.empty()) return "";
+    std::string exe_dir = get_executable_dir();
+    std::vector<std::string> candidates = {
+        exe_dir + "/data/cpu/" + cpu_name + "/lib" + cpu_name + ".so",
+        exe_dir + "/lib" + cpu_name + ".so",
+        "./data/cpu/" + cpu_name + "/lib" + cpu_name + ".so",
+        "./lib" + cpu_name + ".so"
+    };
+
+    for (const auto& c : candidates) {
+        if (fs::exists(c)) return c;
+    }
+    return "";
+}
+
+inline bool ensure_toolchain_loaded(AppState& s) {
+    const std::string cpu_name = get_active_cpu_name(s);
+    if (cpu_name.empty()) {
+        g_toolchain.last_error = "No CPU component selected in motherboard config.";
+        return false;
+    }
+
+    if (g_toolchain.cpu_iface && g_toolchain.cpu_name == cpu_name) return true;
+
+    unload_toolchain();
+
+    std::string so_path = resolve_cpu_library_path(cpu_name);
+    if (so_path.empty()) {
+        g_toolchain.last_error = "Could not find CPU library for: " + cpu_name;
+        return false;
+    }
+
+    void* handle = dlopen(so_path.c_str(), RTLD_LAZY);
+    if (!handle) {
+        g_toolchain.last_error = "dlopen failed: " + std::string(dlerror());
+        return false;
+    }
+
+    auto get_cpu = reinterpret_cast<GetCPUInterfaceFunc>(dlsym(handle, "get_cpu_interface"));
+    if (!get_cpu) {
+        g_toolchain.last_error = "Could not resolve get_cpu_interface in " + so_path;
+        dlclose(handle);
+        return false;
+    }
+
+    CPU_Interface* iface = get_cpu();
+    if (!iface) {
+        g_toolchain.last_error = "CPU interface is null for " + cpu_name;
+        dlclose(handle);
+        return false;
+    }
+
+    if (!iface->get_language_count || !iface->get_language_descriptor ||
+        !iface->build_source || !iface->free_binary_output) {
+        g_toolchain.last_error = "CPU plugin does not implement toolchain API.";
+        dlclose(handle);
+        return false;
+    }
+
+    g_toolchain.so_handle = handle;
+    g_toolchain.cpu_iface = iface;
+    g_toolchain.cpu_name = cpu_name;
+    g_toolchain.so_path = so_path;
+    g_toolchain.last_error.clear();
+    g_language_idx = 0;
+    return true;
+}
+
+static void build_log_callback(int level, const char* message, void* user_data) {
+    if (!user_data) return;
+    auto* log = static_cast<BuildLog*>(user_data);
+    std::string msg = message ? message : "";
+    if (level == CPU_BUILD_LOG_ERROR) log->error(msg);
+    else if (level == CPU_BUILD_LOG_WARNING) log->warn(msg);
+    else log->info(msg);
+}
+
+inline void build_to_rom_via_cpu_plugin(AppState& s, int slot_idx) {
     s.build_log.clear();
-    s.build_log.info("=== Compiling C for slot [" + s.rom_slots[slot_idx].name + "] ===");
 
-    // Write source to a temp file
-    std::string src_path = "/tmp/vae_c_src.c";
-    std::string bin_path = "/tmp/vae_c_out.bin";
-    {
-        std::ofstream f(src_path);
-        if (!f) { s.build_log.error("Cannot write temp file"); return; }
-        f << slot_bufs[slot_idx].data();
-    }
-
-    // Compile to a raw binary using the host cc
-    // -ffreestanding: no stdlib assumptions  -Os: size optimise  -nostdlib
-    std::string cmd = "cc -ffreestanding -nostdlib -Os -o " + bin_path +
-                      " " + src_path + " 2>&1";
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) { s.build_log.error("popen failed"); return; }
-    char cbuf[256];
-    while (fgets(cbuf, sizeof(cbuf), pipe)) {
-        std::string line = cbuf;
-        if (!line.empty() && line.back() == '\n') line.pop_back();
-        // Heuristic: contains "error:" → error, "warning:" → warn
-        if (line.find("error:") != std::string::npos)       s.build_log.error(line);
-        else if (line.find("warning:") != std::string::npos) s.build_log.warn(line);
-        else                                                  s.build_log.info(line);
-    }
-    int rc = pclose(pipe);
-
-    if (rc != 0) {
-        s.build_log.error("Compilation FAILED (exit " + std::to_string(rc) + ")");
+    if (!ensure_toolchain_loaded(s)) {
+        s.build_log.error(g_toolchain.last_error.empty() ? "CPU toolchain unavailable" : g_toolchain.last_error);
         return;
     }
 
-    // Extract raw bytes with objcopy
-    std::string raw_path = "/tmp/vae_c_out.raw";
-    std::string objcopy_cmd = "objcopy -O binary " + bin_path + " " + raw_path + " 2>&1";
-    pipe = popen(objcopy_cmd.c_str(), "r");
-    if (pipe) {
-        while (fgets(cbuf, sizeof(cbuf), pipe)) s.build_log.info(cbuf);
-        pclose(pipe);
-    }
-
-    std::ifstream raw_f(raw_path, std::ios::binary);
-    if (!raw_f) {
-        s.build_log.error("No binary output produced");
+    uint32_t lang_count = g_toolchain.cpu_iface->get_language_count();
+    if (lang_count == 0) {
+        s.build_log.error("CPU plugin reports no supported source languages.");
         return;
     }
-    std::vector<uint8_t> raw_bytes((std::istreambuf_iterator<char>(raw_f)),
-                                     std::istreambuf_iterator<char>());
+    if (g_language_idx < 0 || static_cast<uint32_t>(g_language_idx) >= lang_count) g_language_idx = 0;
+
+    const CPU_LanguageDescriptor* lang = g_toolchain.cpu_iface->get_language_descriptor(static_cast<uint32_t>(g_language_idx));
+    if (!lang || !lang->id) {
+        s.build_log.error("Invalid language descriptor from CPU plugin.");
+        return;
+    }
 
     auto& slot = s.rom_slots[slot_idx];
-    size_t copy = std::min(raw_bytes.size(), slot.data.size());
-    slot.data.assign(slot.data.size(), 0);
-    std::copy(raw_bytes.begin(), raw_bytes.begin() + copy, slot.data.begin());
+    const char* src = slot_bufs[slot_idx].data();
+
+    s.build_log.info("=== Building slot [" + slot.name + "] with CPU [" + g_toolchain.cpu_name + "] ===");
+    s.build_log.info(std::string("Language: ") + (lang->display_name ? lang->display_name : lang->id));
+
+    CPU_BinaryOutput out{};
+    int ok = g_toolchain.cpu_iface->build_source(lang->id, src, &out, build_log_callback, &s.build_log);
+    if (!ok) {
+        s.build_log.error("Build FAILED");
+        if (g_toolchain.cpu_iface->free_binary_output) g_toolchain.cpu_iface->free_binary_output(&out);
+        return;
+    }
+
+    size_t slot_size = slot.data.size();
+    slot.data.assign(slot_size, 0);
+    size_t copy = std::min(static_cast<size_t>(out.size), slot_size);
+    if (copy > 0 && out.data) std::copy(out.data, out.data + copy, slot.data.begin());
+
     slot.modified = true;
-    slot.source   = RomSlot::Source::Code;
-    s.code_buffers[slot_idx] = std::string(slot_bufs[slot_idx].data());
-    s.build_log.info("Compiled " + std::to_string(copy) + " bytes written to ROM");
-    s.build_log.info("Compilation OK");
+    slot.source = RomSlot::Source::Code;
+    s.code_buffers[slot_idx] = std::string(src);
+    s.code_sources[slot_idx] = RomSlot::Source::Code;
+
+    s.build_log.info("Output bytes: " + std::to_string(out.size) + ", copied to ROM: " + std::to_string(copy));
+    s.build_log.info("Origin: 0x" + [] (uint32_t v) {
+        char b[16];
+        std::snprintf(b, sizeof(b), "%04X", v);
+        return std::string(b);
+    }(out.origin));
+    s.build_log.info("Build OK");
+
+    g_toolchain.cpu_iface->free_binary_output(&out);
 }
 
 // ============================================================
@@ -150,25 +231,55 @@ inline void render(AppState& s) {
         int idx = s.active_rom_idx;
         auto& slot = s.rom_slots[idx];
 
-        // ---- Source language selector ----
-        static int lang_idx = 0;   // 0 = Generic ASM  1 = C
-        ImGui::SetNextItemWidth(120);
-        ImGui::Combo("Language", &lang_idx, "Generic ASM\0C\0\0");
+        bool has_toolchain = ensure_toolchain_loaded(s);
+        uint32_t lang_count = has_toolchain ? g_toolchain.cpu_iface->get_language_count() : 0;
+        if (lang_count == 0) g_language_idx = 0;
+        if (g_language_idx < 0 || static_cast<uint32_t>(g_language_idx) >= lang_count) g_language_idx = 0;
+
+        const CPU_LanguageDescriptor* current_lang = nullptr;
+        if (has_toolchain && lang_count > 0) {
+            current_lang = g_toolchain.cpu_iface->get_language_descriptor(static_cast<uint32_t>(g_language_idx));
+        }
+
+        if (!has_toolchain) {
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), "CPU toolchain unavailable: %s", g_toolchain.last_error.c_str());
+        }
+
+        // ---- Source language selector (from CPU plugin) ----
+        ImGui::SetNextItemWidth(220);
+        const char* preview = (current_lang && current_lang->display_name) ? current_lang->display_name : "No language";
+        if (ImGui::BeginCombo("Language", preview)) {
+            if (has_toolchain) {
+                for (uint32_t i = 0; i < lang_count; i++) {
+                    const CPU_LanguageDescriptor* lang = g_toolchain.cpu_iface->get_language_descriptor(i);
+                    const char* name = (lang && lang->display_name) ? lang->display_name : "Unnamed";
+                    bool selected = (static_cast<int>(i) == g_language_idx);
+                    if (ImGui::Selectable(name, selected)) g_language_idx = static_cast<int>(i);
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
         ImGui::SameLine();
 
         // ---- Build button ----
-        bool build_pressed = ImGui::Button(lang_idx == 0 ? "Assemble → ROM" : "Compile → ROM");
+        bool build_pressed = ImGui::Button("Build -> ROM");
         ImGui::SameLine();
         if (slot.source == RomSlot::Source::Code)
             ImGui::TextColored(ImVec4(0.3f,0.9f,0.3f,1), "Last built OK");
         else if (slot.modified)
             ImGui::TextColored(ImVec4(1,0.7f,0,1), "*not built");
 
+        if (current_lang && current_lang->syntax_keywords && current_lang->syntax_keywords[0] != '\0') {
+            ImGui::SeparatorText("Syntax Hints (From CPU Plugin)");
+            ImGui::TextWrapped("%s", current_lang->syntax_keywords);
+        }
+
         ImGui::Separator();
 
         // ---- Editor ----
-        ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.Size > 1 
-                       ? ImGui::GetIO().Fonts->Fonts[1]  // monospace if loaded
+        ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.Size > 1
+                       ? ImGui::GetIO().Fonts->Fonts[1]
                        : ImGui::GetIO().Fonts->Fonts[0]);
 
         ImGui::InputTextMultiline(
@@ -181,8 +292,7 @@ inline void render(AppState& s) {
         ImGui::PopFont();
 
         if (build_pressed) {
-            if (lang_idx == 0) assemble_to_rom(s, idx);
-            else               compile_c_to_rom(s, idx);
+            build_to_rom_via_cpu_plugin(s, idx);
         }
     }
     ImGui::End();
