@@ -14,7 +14,7 @@ static const CPU_LanguageDescriptor g_languages[] = {
         "asm.generic",
         "Generic ASM",
         ".asm;.s",
-        "NOP BRK LDA STA ADC SBC AND ORA EOR CMP INX INY DEX DEY TAX TAY TXA TYA JMP JSR RTS BEQ BNE BCC BCS .ORG .DB .DW .ASCII"
+        "NOP BRK LDA LDX STA ADC SBC AND ORA EOR CMP INX INY DEX DEY TAX TAY TXA TYA JMP JSR RTS BEQ BNE BCC BCS .ORG .DB .DW .ASCII"
     }
 };
 
@@ -63,6 +63,20 @@ void GenericCPU::step(uint8_t* memory) {
             a = memory[pc];
             update_zn_flags(a);
             break;
+        case 0xAD: { // LDA absolute
+            uint16_t addr = static_cast<uint16_t>(memory[pc + 1] | (memory[pc + 2] << 8));
+            a = memory[addr];
+            update_zn_flags(a);
+            pc += 2;
+            break;
+        }
+        case 0xBD: { // LDA absolute,X
+            uint16_t addr = static_cast<uint16_t>(memory[pc + 1] | (memory[pc + 2] << 8));
+            a = memory[static_cast<uint16_t>(addr + x)];
+            update_zn_flags(a);
+            pc += 2;
+            break;
+        }
         case 0x85: { // STA zero page
             pc++;
             uint8_t addr = memory[pc];

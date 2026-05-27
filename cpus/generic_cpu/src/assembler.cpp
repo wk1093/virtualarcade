@@ -196,16 +196,43 @@ AsmResult GenericAssembler::assemble(const std::string& source) {
             else if (mnem == "EOR") opc = 0x49;
             else if (mnem == "CMP") opc = 0xC9;
 
-            if (op.empty() || op[0] != '#') {
-                err(ln + 1, mnem + " currently only supports immediate mode (#value)");
+            if (op.empty()) {
+                err(ln + 1, mnem + " needs operand");
                 continue;
             }
-            uint32_t v = 0;
-            if (!parse_number(op.substr(1), v)) {
-                err(ln + 1, "Invalid immediate: " + op);
+
+            if (op[0] == '#') {
+                uint32_t v = 0;
+                if (!parse_number(op.substr(1), v)) {
+                    err(ln + 1, "Invalid immediate: " + op);
+                } else {
+                    emit(opc);
+                    emit(static_cast<uint8_t>(v));
+                }
+            } else if (mnem == "LDA") {
+                if (tokens.size() >= 3 && to_upper(tokens[2]) == "X") {
+                    uint32_t v = 0;
+                    if (!parse_number(op, v)) {
+                        emit(0xBD);
+                        patches.push_back({result.bytes.size(), op, false, ln + 1, 0});
+                        emit16(0);
+                    } else {
+                        emit(0xBD);
+                        emit16(static_cast<uint16_t>(v));
+                    }
+                } else {
+                    uint32_t v = 0;
+                    if (!parse_number(op, v)) {
+                        emit(0xAD);
+                        patches.push_back({result.bytes.size(), op, false, ln + 1, 0});
+                        emit16(0);
+                    } else {
+                        emit(0xAD);
+                        emit16(static_cast<uint16_t>(v));
+                    }
+                }
             } else {
-                emit(opc);
-                emit(static_cast<uint8_t>(v));
+                err(ln + 1, mnem + " currently only supports immediate mode (#value)");
             }
         } else if (mnem == "STA") {
             if (tokens.size() < 2) {

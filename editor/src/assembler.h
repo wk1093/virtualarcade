@@ -11,6 +11,9 @@
 // Opcodes:     NOP            0xEA
 //              BRK            0x00
 //              LDA #<imm>     0xA9  (load accumulator, immediate)
+//              LDA <addr>     0xAD  (load accumulator, absolute)
+//              LDA <addr>,X   0xBD  (load accumulator, absolute indexed by X)
+//              LDX #<imm>     0xA2  (load X register, immediate)
 //              STA <addr>     0x85  (store accumulator, zero-page addr)
 //              ADC #<imm>     0x69  (add with carry, immediate)
 //              SBC #<imm>     0xE9  (subtract with carry, immediate)
@@ -226,20 +229,22 @@ AsmResult assemble(const std::string& source) {
                 err(ln+1, mnem + " currently only supports immediate mode (#value)");
             }
         }
+        else if (mnem == "LDX") {
+            if (tokens.size() < 2) { err(ln+1, "LDX needs operand"); continue; }
+            std::string op = tokens[1];
+            if (op.empty() || op[0] != '#') {
+                err(ln+1, "LDX currently only supports immediate mode (#value)");
+                continue;
+            }
+            uint32_t v = 0;
+            if (!parse_number(op.substr(1), v)) err(ln+1, "Invalid immediate: " + op);
+            else { emit(0xA2); emit(static_cast<uint8_t>(v)); }
+        }
         else if (mnem == "STA") {
             if (tokens.size() < 2) { err(ln+1, "STA needs operand"); continue; }
             uint32_t v = 0;
             if (!parse_number(tokens[1], v)) err(ln+1, "Invalid STA address: " + tokens[1]);
             else { emit(0x85); emit(static_cast<uint8_t>(v)); }
-        }
-        else if (mnem == "LDX") {
-            if (tokens.size() < 2) { err(ln+1, "LDX needs operand"); continue; }
-            std::string op = tokens[1];
-            if (op[0] == '#') {
-                uint32_t v = 0;
-                if (!parse_number(op.substr(1), v)) err(ln+1, "Invalid immediate: " + op);
-                else { emit(0xA2); emit(static_cast<uint8_t>(v)); }
-            } else { err(ln+1, "LDX only supports immediate mode"); }
         }
         else if (mnem == "LDY") {
             if (tokens.size() < 2) { err(ln+1, "LDY needs operand"); continue; }

@@ -306,25 +306,32 @@ inline void render_build_panel(AppState& s) {
         if (ImGui::SmallButton("Clear")) s.build_log.clear();
         ImGui::Separator();
 
-        ImGui::BeginChild("BuildLog", ImVec2(0, 0), ImGuiChildFlags_None,
-                          ImGuiWindowFlags_HorizontalScrollbar);
+        std::string build_text;
         for (const auto& e : s.build_log.entries) {
             switch (e.level) {
             case LogEntry::Level::Error:
-                ImGui::TextColored(ImVec4(1.0f,0.4f,0.4f,1), "[ERR] %s", e.message.c_str());
+                build_text += "[ERR] ";
                 break;
             case LogEntry::Level::Warning:
-                ImGui::TextColored(ImVec4(1.0f,0.8f,0.0f,1), "[WRN] %s", e.message.c_str());
+                build_text += "[WRN] ";
                 break;
             default:
-                ImGui::TextUnformatted(e.message.c_str());
+                build_text += "[INF] ";
                 break;
             }
+            build_text += e.message;
+            build_text += '\n';
         }
-        // Auto-scroll to bottom
-        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
-            ImGui::SetScrollHereY(1.0f);
-        ImGui::EndChild();
+
+        std::vector<char> build_buffer(build_text.begin(), build_text.end());
+        build_buffer.push_back('\0');
+
+        ImGui::InputTextMultiline(
+            "##BuildLog",
+            build_buffer.data(),
+            build_buffer.size(),
+            ImVec2(-FLT_MIN, -FLT_MIN),
+            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_AllowTabInput);
     }
     ImGui::End();
 }

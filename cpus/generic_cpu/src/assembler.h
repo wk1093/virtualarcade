@@ -22,8 +22,8 @@ public:
      * Assemble generic CPU assembly code into machine code
      * 
      * Supports:
-     * - Mnemonics: NOP, BRK, LDA, STA, ADC, SBC, AND, ORA, EOR, CMP, 
-     *              INX, INY, DEX, DEY, TAX, TAY, TXA, TYA, JMP, JSR, RTS,
+    * - Mnemonics: NOP, BRK, LDA, LDX, STA, ADC, SBC, AND, ORA, EOR, CMP,
+    *              INX, INY, DEX, DEY, TAX, TAY, TXA, TYA, JMP, JSR, RTS,
      *              BEQ, BNE, BCC, BCS
      * - Directives: .ORG, .DB, .DW, .ASCII
      * - Labels with absolute and relative addressing
