@@ -1,0 +1,26 @@
+{
+  "name": "Generic Retro System",
+  "version": "1.0.0",
+  "master_clock": 21477272,
+  "components": [
+    {
+      "name": "MainCPU",
+      "type": "cpu",
+      "library_path": "./build/cpus/generic_cpu/libgeneric_cpu.so",
+      "config": {
+        "speed_ratio": 1.0,
+        "reset_vector": "0x8000"
+      }
+    },
+    {
+      "name": "VideoChip",
+      "type": "gpu",
+      "library_path": "./build/gpus/generic_gpu/libgeneric_gpu.so",
+      "config": {
+        "resolution_w": 256,
+        "resolution_h": 240,
+        "speed_ratio": 0.33
+      }
+    }
+  ]
+}
