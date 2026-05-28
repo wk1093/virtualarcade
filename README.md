@@ -47,7 +47,7 @@ root/
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 * **1:1 Accuracy Potential:** By utilizing a cycle-synchronous dispatcher, VAE can support 1:1 hardware recreation (e.g., NES/2C02) when paired with accurate CPU/PPU plugins.
 * **Dynamic Plugin System:** Add new hardware support by dropping a library into the `plugins/` folder. The platform auto-discovers and integrates the hardware into the motherboard UI.
@@ -57,21 +57,17 @@ root/
 
 ---
 
-## 🛠️ Getting Started
+## Getting Started
 
 1. **Clone the Repository:** Ensure you have CMake 3.20+ and a C++20 compatible compiler.
-2. **Build:** ```bash
+2. **Build:** 
+```bash
 mkdir build && cd build
 cmake ..
 make
 ```
 
-```
 
 
 3. **Create:** Open the `editor` executable to design your first motherboard, define your memory map, and load your binary assets.
 4. **Run:** Execute the `runner` with your project directory as an argument to launch your virtual arcade cabinet.
-
----
-
-*VAE is currently in active development. We aim to provide the most authentic, engineer-focused retro-computing experience on the market. For contributors, please check the `common/` header definitions to begin building your own custom CPU or GPU plugins.*
