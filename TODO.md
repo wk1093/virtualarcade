@@ -1,0 +1,2 @@
+- [ ] TextMate grammar instead of custom simple syntax highlighting (textmate allows us to ~~steal~~borrow syntax from vscode plugins and other sources.)
+- [ ] Full 6502 implementation.
