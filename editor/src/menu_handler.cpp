@@ -90,6 +90,7 @@ void MenuHandler::render_view_menu(AppState& state) {
         ImGui::MenuItem("ROM Editor",  nullptr, &state.show_rom_panel);
         ImGui::MenuItem("Code Editor", nullptr, &state.show_code_panel);
         ImGui::MenuItem("Build Output", nullptr, &state.show_build_panel);
+        ImGui::MenuItem("Program Output", nullptr, &state.show_program_panel);
         ImGui::EndMenu();
     }
 }
@@ -115,8 +116,19 @@ void MenuHandler::render_run_menu(AppState& state) {
 
             // Build and execute command
             std::string runner_path = get_runner_path();
-            std::string cmd = runner_path + " \"" + mb + "\" \"" + img + "\" &";
+            {
+                std::ofstream out(state.runner_stdout_log_file, std::ios::trunc);
+                if (!out) {
+                    state.build_log.error("Failed to open program output log: " + state.runner_stdout_log_file);
+                    ImGui::EndMenu();
+                    return;
+                }
+            }
+
+            std::string cmd = runner_path + " \"" + mb + "\" \"" + img +
+                              "\" > \"" + state.runner_stdout_log_file + "\" &";
             state.build_log.info("Launching: " + cmd);
+            state.show_program_panel = true;
             
             int result = std::system(cmd.c_str());
             if (result != 0) {

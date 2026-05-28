@@ -129,7 +129,11 @@ struct AppState {
     bool       show_rom_panel         = true;
     bool       show_code_panel        = true;
     bool       show_build_panel       = true;
+    bool       show_program_panel     = true;
     bool       show_hex_panel         = true;
+
+    // Runner stdout redirection target for Program Output panel.
+    std::string runner_stdout_log_file = "/tmp/vae_runner_stdout.log";
 
     // ---- Helpers ----
 

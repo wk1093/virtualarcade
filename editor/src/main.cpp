@@ -44,6 +44,7 @@ static void render_content_panes(AppState& s) {
     RomPanel::render_center(s);
     CodePanel::render(s);
     CodePanel::render_build_panel(s);
+    CodePanel::render_program_panel(s);
 }
 
 // ============================================================

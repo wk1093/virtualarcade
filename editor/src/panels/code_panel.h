@@ -22,6 +22,20 @@
 
 namespace CodePanel {
 
+struct LogAutoScrollState {
+    bool follow_tail = false;
+};
+
+inline int readonly_tail_scroll_callback(ImGuiInputTextCallbackData* data) {
+    if (!data || !data->UserData) return 0;
+    auto* state = static_cast<LogAutoScrollState*>(data->UserData);
+    if (!state->follow_tail) return 0;
+    data->CursorPos = data->BufTextLen;
+    data->SelectionStart = data->BufTextLen;
+    data->SelectionEnd = data->BufTextLen;
+    return 0;
+}
+
 // Per-slot static text buffers (heap-allocated, one per slot)
 static std::vector<std::vector<char>> slot_bufs;
 static int  buf_slot_version = -1; // trigger rebuild when slot count changes
@@ -326,12 +340,56 @@ inline void render_build_panel(AppState& s) {
         std::vector<char> build_buffer(build_text.begin(), build_text.end());
         build_buffer.push_back('\0');
 
+        static size_t last_build_size = 0;
+        LogAutoScrollState build_scroll;
+        build_scroll.follow_tail = build_text.size() != last_build_size;
+        last_build_size = build_text.size();
+
         ImGui::InputTextMultiline(
             "##BuildLog",
             build_buffer.data(),
             build_buffer.size(),
             ImVec2(-FLT_MIN, -FLT_MIN),
-            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_AllowTabInput);
+            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackAlways,
+            readonly_tail_scroll_callback,
+            &build_scroll);
+    }
+    ImGui::End();
+}
+
+inline void render_program_panel(AppState& s) {
+    if (ImGui::Begin("Program Output", &s.show_program_panel)) {
+        if (ImGui::SmallButton("Clear")) {
+            std::ofstream trunc(s.runner_stdout_log_file, std::ios::trunc);
+        }
+        ImGui::Separator();
+
+        std::string program_text;
+        {
+            std::ifstream in(s.runner_stdout_log_file);
+            if (in) {
+                std::ostringstream ss;
+                ss << in.rdbuf();
+                program_text = ss.str();
+            }
+        }
+
+        std::vector<char> program_buffer(program_text.begin(), program_text.end());
+        program_buffer.push_back('\0');
+
+        static size_t last_program_size = 0;
+        LogAutoScrollState program_scroll;
+        program_scroll.follow_tail = program_text.size() != last_program_size;
+        last_program_size = program_text.size();
+
+        ImGui::InputTextMultiline(
+            "##ProgramOutput",
+            program_buffer.data(),
+            program_buffer.size(),
+            ImVec2(-FLT_MIN, -FLT_MIN),
+            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackAlways,
+            readonly_tail_scroll_callback,
+            &program_scroll);
     }
     ImGui::End();
 }
