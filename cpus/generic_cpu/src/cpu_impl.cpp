@@ -8,16 +8,7 @@
 #include <cstdlib>
 
 namespace {
-
-static const CPU_LanguageDescriptor g_languages[] = {
-    {
-        "asm.generic",
-        "Generic ASM",
-        ".asm;.s",
-        "NOP BRK LDA LDX STA ADC SBC AND ORA EOR CMP INX INY DEX DEY TAX TAY TXA TYA JMP JSR RTS BEQ BNE BCC BCS .ORG .DB .DW .ASCII"
-    }
-};
-
+// Language descriptors are now defined in cpu.json instead
 } // namespace
 
 GenericCPU::GenericCPU() : pc(0), a(0), x(0), y(0), sp(0xFF), status(0), cycle_count(0) {}
@@ -210,12 +201,14 @@ static const char* cpu_get_name() {
 }
 
 static uint32_t cpu_get_language_count() {
-    return static_cast<uint32_t>(sizeof(g_languages) / sizeof(g_languages[0]));
+    // Language list is now in cpu.json; plugin returns 0
+    return 0;
 }
 
 static const CPU_LanguageDescriptor* cpu_get_language_descriptor(uint32_t index) {
-    if (index >= cpu_get_language_count()) return nullptr;
-    return &g_languages[index];
+    // Language descriptors are now in cpu.json; plugin returns nullptr
+    (void)index;
+    return nullptr;
 }
 
 static int cpu_build_source(
@@ -236,7 +229,12 @@ static int cpu_build_source(
     }
 
     std::string lang(language_id);
-    if (lang != "asm.generic") {
+    const bool supported_language =
+        (lang == "asm.6502") ||
+        (lang == "asm.generic") ||
+        (lang == "asm") ||
+        (lang == "6502");
+    if (!supported_language) {
         if (log_fn) log_fn(CPU_BUILD_LOG_ERROR, "Unsupported language for Generic CPU", user_data);
         return 0;
     }
@@ -306,7 +304,7 @@ CPU_Specification* get_cpu_spec() {
         .isa_version = "1.1",
         .supports_assembly = 1,
         .supports_c_compilation = 0,
-        .assembly_syntax = "generic"
+        .assembly_syntax = "6502"
     };
 
     return &spec;

@@ -1,0 +1,15 @@
+{
+  "case_sensitive": false,
+  "line_comment": ";",
+  "keywords": [
+    "NOP", "BRK", "LDA", "LDX", "STA", "ADC", "SBC", "AND", "ORA", "EOR",
+    "CMP", "INX", "INY", "DEX", "DEY", "TAX", "TAY", "TXA", "TYA", "JMP",
+    "JSR", "RTS", "BEQ", "BNE", "BCC", "BCS"
+  ],
+  "directives": [
+    ".ORG", ".DB", ".DW", ".ASCII"
+  ],
+  "types": [
+    "A", "X", "Y", "SP", "PC"
+  ]
+}

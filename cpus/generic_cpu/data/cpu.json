@@ -4,9 +4,14 @@
   "library_path": "libgeneric_cpu.so",
   
   "compilation": {
-    "supports_assembly": true,
-    "supports_c": false,
-    "assembly_syntax": "generic"
+    "languages": [
+      {
+        "id": "asm.6502",
+        "type": "asm",
+        "name": "6502 Assembly (Intel-like)",
+        "syntax": "lang6502.json"
+      }
+    ]
   },
 
   "defaults": {

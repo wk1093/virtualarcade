@@ -50,6 +50,9 @@ add_custom_command(TARGET editor POST_BUILD
         ${CMAKE_SOURCE_DIR}/cpus/generic_cpu/data/cpu.json
         ${CMAKE_BINARY_DIR}/bin/data/cpu/generic_cpu/
     COMMAND ${CMAKE_COMMAND} -E copy 
+        ${CMAKE_SOURCE_DIR}/cpus/generic_cpu/data/lang6502.json
+        ${CMAKE_BINARY_DIR}/bin/data/cpu/generic_cpu/
+    COMMAND ${CMAKE_COMMAND} -E copy 
         ${CMAKE_BINARY_DIR}/bin/libgeneric_cpu.so
         ${CMAKE_BINARY_DIR}/bin/data/cpu/generic_cpu/
 )
